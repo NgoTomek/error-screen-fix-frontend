@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react'
+import { X, Mail, Lock, Eye, EyeOff, AlertCircle, CheckCircle } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 
 export const SignInModal = ({ isOpen, onClose }) => {
-  const { login, loginWithGoogle, forgotPassword, register, error } = useAuth()
+  const { login, loginWithGoogle, forgotPassword, register, resendVerification, error } = useAuth()
   const [mode, setMode] = useState('signin') // signin, signup, forgot
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -21,8 +21,53 @@ export const SignInModal = ({ isOpen, onClose }) => {
   const [localError, setLocalError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
+  const resetForm = () => {
+    setEmail('')
+    setPassword('')
+    setConfirmPassword('')
+    setDisplayName('')
+    setLocalError('')
+    setSuccessMessage('')
+    setShowPassword(false)
+  }
+
+  const handleModeChange = (newMode) => {
+    setMode(newMode)
+    resetForm()
+  }
+
+  const validateForm = () => {
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      setLocalError('Please enter a valid email address')
+      return false
+    }
+
+    if (mode !== 'forgot') {
+      if (!password || password.length < 6) {
+        setLocalError('Password must be at least 6 characters')
+        return false
+      }
+
+      if (mode === 'signup') {
+        if (!displayName || displayName.trim().length < 2) {
+          setLocalError('Display name must be at least 2 characters')
+          return false
+        }
+
+        if (password !== confirmPassword) {
+          setLocalError('Passwords do not match')
+          return false
+        }
+      }
+    }
+
+    return true
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (!validateForm()) return
+
     setLocalError('')
     setSuccessMessage('')
     setLoading(true)
@@ -32,19 +77,12 @@ export const SignInModal = ({ isOpen, onClose }) => {
         await login(email, password)
         onClose()
       } else if (mode === 'signup') {
-        if (password !== confirmPassword) {
-          setLocalError('Passwords do not match')
-          setLoading(false)
-          return
-        }
-        if (password.length < 6) {
-          setLocalError('Password must be at least 6 characters')
-          setLoading(false)
-          return
-        }
-        await register(email, password, displayName)
-        setSuccessMessage('Account created! Please check your email to verify.')
-        setTimeout(() => onClose(), 3000)
+        await register(email, password, displayName.trim())
+        setSuccessMessage('Account created! Please check your email to verify your account.')
+        setTimeout(() => {
+          onClose()
+          resetForm()
+        }, 3000)
       } else if (mode === 'forgot') {
         await forgotPassword(email)
         setSuccessMessage('Password reset email sent! Check your inbox.')
@@ -63,10 +101,27 @@ export const SignInModal = ({ isOpen, onClose }) => {
   const handleGoogleSignIn = async () => {
     try {
       setLocalError('')
+      setLoading(true)
       await loginWithGoogle()
       onClose()
     } catch (err) {
       setLocalError(err.message || 'Failed to sign in with Google')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResendVerification = async () => {
+    try {
+      setLocalError('')
+      const sent = await resendVerification()
+      if (sent) {
+        setSuccessMessage('Verification email sent!')
+      } else {
+        setLocalError('Unable to send verification email')
+      }
+    } catch (err) {
+      setLocalError(err.message || 'Failed to send verification email')
     }
   }
 
@@ -85,12 +140,12 @@ export const SignInModal = ({ isOpen, onClose }) => {
           initial={{ scale: 0.95, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.95, opacity: 0 }}
-          className="bg-white rounded-lg p-8 max-w-md w-full"
+          className="bg-white rounded-lg p-8 max-w-md w-full max-h-[90vh] overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold text-gray-900">
-              {mode === 'signin' && 'Sign In'}
+              {mode === 'signin' && 'Welcome Back'}
               {mode === 'signup' && 'Create Account'}
               {mode === 'forgot' && 'Reset Password'}
             </h2>
@@ -111,6 +166,7 @@ export const SignInModal = ({ isOpen, onClose }) => {
 
           {successMessage && (
             <Alert className="mb-4 border-green-200 bg-green-50">
+              <CheckCircle className="h-4 w-4 text-green-600" />
               <AlertDescription className="text-green-800">
                 {successMessage}
               </AlertDescription>
@@ -126,40 +182,50 @@ export const SignInModal = ({ isOpen, onClose }) => {
                   type="text"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="Your name"
+                  placeholder="Your full name"
                   required
+                  disabled={loading}
                 />
               </div>
             )}
 
             <div>
               <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Enter your email"
-                required
-              />
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter your email"
+                  className="pl-10"
+                  required
+                  disabled={loading}
+                />
+              </div>
             </div>
 
             {mode !== 'forgot' && (
               <div>
                 <Label htmlFor="password">Password</Label>
                 <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <Input
                     id="password"
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
+                    className="pl-10 pr-10"
                     required
+                    disabled={loading}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    disabled={loading}
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4" />
@@ -168,20 +234,30 @@ export const SignInModal = ({ isOpen, onClose }) => {
                     )}
                   </button>
                 </div>
+                {mode === 'signup' && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Must be at least 6 characters
+                  </p>
+                )}
               </div>
             )}
 
             {mode === 'signup' && (
               <div>
                 <Label htmlFor="confirmPassword">Confirm Password</Label>
-                <Input
-                  id="confirmPassword"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Confirm your password"
-                  required
-                />
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm your password"
+                    className="pl-10"
+                    required
+                    disabled={loading}
+                  />
+                </div>
               </div>
             )}
 
@@ -189,8 +265,9 @@ export const SignInModal = ({ isOpen, onClose }) => {
               <div className="flex justify-end">
                 <button
                   type="button"
-                  onClick={() => setMode('forgot')}
+                  onClick={() => handleModeChange('forgot')}
                   className="text-sm text-blue-600 hover:text-blue-800"
+                  disabled={loading}
                 >
                   Forgot password?
                 </button>
@@ -233,6 +310,7 @@ export const SignInModal = ({ isOpen, onClose }) => {
                 variant="outline"
                 className="w-full"
                 onClick={handleGoogleSignIn}
+                disabled={loading}
               >
                 <svg className="h-5 w-5 mr-2" viewBox="0 0 24 24">
                   <path
@@ -263,8 +341,9 @@ export const SignInModal = ({ isOpen, onClose }) => {
                 Don't have an account?{' '}
                 <button
                   type="button"
-                  onClick={() => setMode('signup')}
+                  onClick={() => handleModeChange('signup')}
                   className="text-blue-600 hover:text-blue-800 font-medium"
+                  disabled={loading}
                 >
                   Sign up
                 </button>
@@ -275,8 +354,9 @@ export const SignInModal = ({ isOpen, onClose }) => {
                 Already have an account?{' '}
                 <button
                   type="button"
-                  onClick={() => setMode('signin')}
+                  onClick={() => handleModeChange('signin')}
                   className="text-blue-600 hover:text-blue-800 font-medium"
+                  disabled={loading}
                 >
                   Sign in
                 </button>
@@ -285,16 +365,29 @@ export const SignInModal = ({ isOpen, onClose }) => {
             {mode === 'forgot' && (
               <button
                 type="button"
-                onClick={() => setMode('signin')}
+                onClick={() => handleModeChange('signin')}
                 className="text-sm text-blue-600 hover:text-blue-800"
+                disabled={loading}
               >
                 Back to sign in
               </button>
             )}
           </div>
+
+          {mode === 'signup' && (
+            <div className="mt-4 text-center">
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                className="text-xs text-gray-500 hover:text-gray-700"
+                disabled={loading}
+              >
+                Need to resend verification email?
+              </button>
+            </div>
+          )}
         </motion.div>
       </motion.div>
     </AnimatePresence>
   )
 }
-
