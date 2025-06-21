@@ -1,5 +1,9 @@
 import { useState, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { AuthProvider } from './contexts/AuthContext'
+import { SignInModal } from './components/auth/SignInModal'
+import { UserMenu } from './components/auth/UserMenu'
+import { useAuth } from './contexts/AuthContext'
 import { 
   Upload, Zap, Shield, Users, CheckCircle, 
   BookOpen, User, LogOut, Download, 
@@ -9,16 +13,24 @@ import {
 import { Button } from '@/components/ui/button.jsx'
 import './App.css'
 
-const API_BASE_URL = 'https://8081-insb5rm9i3jxrls3xlp4a-be9ed442.manusvm.computer'
+const API_BASE_URL = 'https://8082-insb5rm9i3jxrls3xlp4a-be9ed442.manusvm.computer'
 
 function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  )
+}
+
+function AppContent() {
+  const { user, isAuthenticated } = useAuth()
   // State management
   const [currentPage, setCurrentPage] = useState('home')
   const [selectedFile, setSelectedFile] = useState(null)
   const [additionalInfo, setAdditionalInfo] = useState('')
   const [analysisResult, setAnalysisResult] = useState(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [isSignedIn, setIsSignedIn] = useState(false)
   const [showSignInModal, setShowSignInModal] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
   const [bookmarkedSolutions, setBookmarkedSolutions] = useState(new Set())
@@ -329,20 +341,11 @@ function App() {
 
           {/* User Actions */}
           <div className="flex items-center space-x-4">
-            {isSignedIn ? (
-              <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-700">Welcome back!</span>
-                <button
-                  onClick={handleSignOut}
-                  className="flex items-center space-x-1 px-3 py-2 text-sm text-gray-700 hover:text-red-600 transition-colors"
-                >
-                  <LogOut className="h-4 w-4" />
-                  <span>Sign Out</span>
-                </button>
-              </div>
+            {isAuthenticated ? (
+              <UserMenu />
             ) : (
               <button
-                onClick={handleSignIn}
+                onClick={() => setShowSignInModal(true)}
                 className="flex items-center space-x-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 <User className="h-4 w-4" />
@@ -1223,7 +1226,10 @@ function App() {
         {currentPage === 'help' && <HelpPage />}
       </main>
 
-      <SignInModal />
+      <SignInModal 
+        isOpen={showSignInModal} 
+        onClose={() => setShowSignInModal(false)} 
+      />
       <ExportModal />
     </div>
   )
