@@ -37,15 +37,15 @@ import {
   deleteObject
 } from 'firebase/storage'
 
-// Your Firebase configuration
+// Firebase configuration - replace with your actual config
 const firebaseConfig = {
-  apiKey: "your-api-key",
-  authDomain: "your-auth-domain",
-  projectId: "your-project-id",
-  storageBucket: "your-storage-bucket",
-  messagingSenderId: "your-messaging-sender-id",
-  appId: "your-app-id",
-  measurementId: "your-measurement-id"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "demo-key",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "error-screen-fix.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "error-screen-fix",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "error-screen-fix.appspot.com",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "123456789",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:123456789:web:abcdef",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-ABCDEF"
 }
 
 // Initialize Firebase
@@ -56,8 +56,13 @@ export const auth = getAuth(app)
 export const db = getFirestore(app)
 export const storage = getStorage(app)
 
+// Configure auth settings
+auth.useDeviceLanguage()
+
 // Auth providers
 export const googleProvider = new GoogleAuthProvider()
+googleProvider.addScope('email')
+googleProvider.addScope('profile')
 
 // Auth functions
 export const createUser = async (email, password, displayName) => {
@@ -76,6 +81,7 @@ export const createUser = async (email, password, displayName) => {
       uid: user.uid,
       email: user.email,
       displayName,
+      emailVerified: false,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       role: 'user',
@@ -85,15 +91,23 @@ export const createUser = async (email, password, displayName) => {
       reputation: 0,
       bio: '',
       avatarUrl: '',
+      username: '',
       settings: {
         emailNotifications: true,
         communityNotifications: true,
-        darkMode: false
+        darkMode: false,
+        language: 'en'
+      },
+      stats: {
+        errorsResolved: 0,
+        solutionsHelpful: 0,
+        communityPoints: 0
       }
     })
     
     return user
   } catch (error) {
+    console.error('Error creating user:', error)
     throw error
   }
 }
@@ -103,6 +117,7 @@ export const signIn = async (email, password) => {
     const userCredential = await signInWithEmailAndPassword(auth, email, password)
     return userCredential.user
   } catch (error) {
+    console.error('Error signing in:', error)
     throw error
   }
 }
@@ -116,11 +131,12 @@ export const signInWithGoogle = async () => {
     const userDoc = await getDoc(doc(db, 'users', user.uid))
     
     if (!userDoc.exists()) {
-      // Create user profile
+      // Create user profile for new Google users
       await setDoc(doc(db, 'users', user.uid), {
         uid: user.uid,
         email: user.email,
         displayName: user.displayName,
+        emailVerified: user.emailVerified,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         role: 'user',
@@ -130,16 +146,30 @@ export const signInWithGoogle = async () => {
         reputation: 0,
         bio: '',
         avatarUrl: user.photoURL || '',
+        username: '',
         settings: {
           emailNotifications: true,
           communityNotifications: true,
-          darkMode: false
+          darkMode: false,
+          language: 'en'
+        },
+        stats: {
+          errorsResolved: 0,
+          solutionsHelpful: 0,
+          communityPoints: 0
         }
+      })
+    } else {
+      // Update last login for existing users
+      await updateDoc(doc(db, 'users', user.uid), {
+        lastLoginAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       })
     }
     
     return user
   } catch (error) {
+    console.error('Error signing in with Google:', error)
     throw error
   }
 }
@@ -148,14 +178,32 @@ export const logOut = async () => {
   try {
     await signOut(auth)
   } catch (error) {
+    console.error('Error signing out:', error)
     throw error
   }
 }
 
 export const resetPassword = async (email) => {
   try {
-    await sendPasswordResetEmail(auth, email)
+    await sendPasswordResetEmail(auth, email, {
+      url: `${window.location.origin}/signin`,
+      handleCodeInApp: false
+    })
   } catch (error) {
+    console.error('Error sending password reset:', error)
+    throw error
+  }
+}
+
+export const resendVerificationEmail = async () => {
+  try {
+    if (auth.currentUser && !auth.currentUser.emailVerified) {
+      await sendEmailVerification(auth.currentUser)
+      return true
+    }
+    return false
+  } catch (error) {
+    console.error('Error resending verification email:', error)
     throw error
   }
 }
@@ -165,10 +213,11 @@ export const getUserProfile = async (uid) => {
   try {
     const userDoc = await getDoc(doc(db, 'users', uid))
     if (userDoc.exists()) {
-      return userDoc.data()
+      return { id: userDoc.id, ...userDoc.data() }
     }
     return null
   } catch (error) {
+    console.error('Error getting user profile:', error)
     throw error
   }
 }
@@ -180,6 +229,22 @@ export const updateUserProfile = async (uid, data) => {
       updatedAt: serverTimestamp()
     })
   } catch (error) {
+    console.error('Error updating user profile:', error)
+    throw error
+  }
+}
+
+export const checkUsernameAvailability = async (username) => {
+  try {
+    const q = query(
+      collection(db, 'users'), 
+      where('username', '==', username),
+      limit(1)
+    )
+    const querySnapshot = await getDocs(q)
+    return querySnapshot.empty
+  } catch (error) {
+    console.error('Error checking username:', error)
     throw error
   }
 }
@@ -196,6 +261,7 @@ export const uploadAvatar = async (uid, file) => {
     
     return downloadURL
   } catch (error) {
+    console.error('Error uploading avatar:', error)
     throw error
   }
 }
@@ -207,68 +273,7 @@ export const uploadErrorScreenshot = async (file, analysisId) => {
     const downloadURL = await getDownloadURL(snapshot.ref)
     return downloadURL
   } catch (error) {
-    throw error
-  }
-}
-
-// Community functions
-export const createCommunityPost = async (postData) => {
-  try {
-    const docRef = await addDoc(collection(db, 'community-posts'), {
-      ...postData,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      viewCount: 0,
-      upvoteCount: 0,
-      downvoteCount: 0,
-      commentCount: 0,
-      bookmarkCount: 0
-    })
-    return docRef.id
-  } catch (error) {
-    throw error
-  }
-}
-
-export const getCommunityPosts = async (filters = {}) => {
-  try {
-    let q = collection(db, 'community-posts')
-    
-    // Apply filters
-    if (filters.category) {
-      q = query(q, where('category', '==', filters.category))
-    }
-    
-    if (filters.authorId) {
-      q = query(q, where('authorId', '==', filters.authorId))
-    }
-    
-    // Apply sorting
-    if (filters.sortBy === 'popular') {
-      q = query(q, orderBy('viewCount', 'desc'))
-    } else if (filters.sortBy === 'top') {
-      q = query(q, orderBy('upvoteCount', 'desc'))
-    } else {
-      q = query(q, orderBy('createdAt', 'desc'))
-    }
-    
-    // Apply limit
-    if (filters.limit) {
-      q = query(q, limit(filters.limit))
-    }
-    
-    const querySnapshot = await getDocs(q)
-    const posts = []
-    
-    querySnapshot.forEach((doc) => {
-      posts.push({
-        id: doc.id,
-        ...doc.data()
-      })
-    })
-    
-    return posts
-  } catch (error) {
+    console.error('Error uploading screenshot:', error)
     throw error
   }
 }
@@ -277,7 +282,9 @@ export const getCommunityPosts = async (filters = {}) => {
 export const subscribeToUserProfile = (uid, callback) => {
   return onSnapshot(doc(db, 'users', uid), (doc) => {
     if (doc.exists()) {
-      callback(doc.data())
+      callback({ id: doc.id, ...doc.data() })
+    } else {
+      callback(null)
     }
   })
 }
@@ -294,3 +301,32 @@ export const getCurrentUserToken = async () => {
   return null
 }
 
+// Analytics and user activity
+export const incrementAnalysisCount = async (uid) => {
+  try {
+    const userRef = doc(db, 'users', uid)
+    const userDoc = await getDoc(userRef)
+    
+    if (userDoc.exists()) {
+      const currentCount = userDoc.data().analysisCount || 0
+      await updateDoc(userRef, {
+        analysisCount: currentCount + 1,
+        updatedAt: serverTimestamp()
+      })
+    }
+  } catch (error) {
+    console.error('Error incrementing analysis count:', error)
+  }
+}
+
+export const updateUserActivity = async (uid, activity) => {
+  try {
+    await addDoc(collection(db, 'user-activity'), {
+      uid,
+      activity,
+      timestamp: serverTimestamp()
+    })
+  } catch (error) {
+    console.error('Error logging user activity:', error)
+  }
+}
