@@ -45,21 +45,28 @@ export const AuthProvider = ({ children }) => {
           const profile = await getUserProfile(firebaseUser.uid)
           setUserProfile(profile)
           
-          // Register/login with backend if available
+          // Register/login with backend
           try {
             const token = await getCurrentUserToken()
-            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8081'
+            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8082'
             
-            const response = await fetch(`${apiUrl}/api/auth/login`, {
+            const response = await fetch(`${apiUrl}/api/auth/register`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
-              }
+              },
+              body: JSON.stringify({
+                username: profile?.username || '',
+                displayName: profile?.displayName || firebaseUser.displayName || ''
+              })
             })
             
             if (!response.ok) {
-              console.warn('Backend login failed - continuing with frontend only')
+              console.warn('Backend registration failed - continuing with frontend only')
+            } else {
+              const backendData = await response.json()
+              console.log('Backend user registered/logged in:', backendData)
             }
           } catch (backendError) {
             console.warn('Backend not available - continuing with frontend only')
@@ -99,7 +106,7 @@ export const AuthProvider = ({ children }) => {
       // Try to register with backend
       try {
         const token = await firebaseUser.getIdToken()
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8081'
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8082'
         
         const response = await fetch(`${apiUrl}/api/auth/register`, {
           method: 'POST',
@@ -107,7 +114,10 @@ export const AuthProvider = ({ children }) => {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ displayName })
+          body: JSON.stringify({ 
+            displayName,
+            username: '' // Optional username
+          })
         })
         
         if (!response.ok) {
@@ -174,7 +184,7 @@ export const AuthProvider = ({ children }) => {
       // Try to update backend profile
       try {
         const token = await getCurrentUserToken()
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8081'
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8082'
         
         const response = await fetch(`${apiUrl}/api/auth/profile`, {
           method: 'PUT',
@@ -222,7 +232,7 @@ export const AuthProvider = ({ children }) => {
 
       // Then check backend if available
       try {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8081'
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8082'
         const response = await fetch(`${apiUrl}/api/auth/check-username`, {
           method: 'POST',
           headers: {
