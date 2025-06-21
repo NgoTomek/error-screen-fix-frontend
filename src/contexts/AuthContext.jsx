@@ -13,9 +13,10 @@ import {
   updateUserProfile,
   getCurrentUserToken,
   subscribeToAuthState,
-  subscribeToUserProfile
+  subscribeToUserProfile,
+  resendVerificationEmail,
+  incrementAnalysisCount
 } from '@/lib/firebase'
-import { doc, getDoc } from 'firebase/firestore'
 
 const AuthContext = createContext({})
 
@@ -44,21 +45,28 @@ export const AuthProvider = ({ children }) => {
           const profile = await getUserProfile(firebaseUser.uid)
           setUserProfile(profile)
           
-          // Register/login with backend
-          const token = await getCurrentUserToken()
-          const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8081'}/api/auth/login`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
+          // Register/login with backend if available
+          try {
+            const token = await getCurrentUserToken()
+            const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8081'
+            
+            const response = await fetch(`${apiUrl}/api/auth/login`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              }
+            })
+            
+            if (!response.ok) {
+              console.warn('Backend login failed - continuing with frontend only')
             }
-          })
-          
-          if (!response.ok) {
-            console.error('Backend login failed')
+          } catch (backendError) {
+            console.warn('Backend not available - continuing with frontend only')
           }
         } catch (error) {
           console.error('Error fetching user profile:', error)
+          setError('Failed to load user profile')
         }
       } else {
         setUser(null)
@@ -88,19 +96,25 @@ export const AuthProvider = ({ children }) => {
       setError(null)
       const firebaseUser = await createUser(email, password, displayName)
       
-      // Register with backend
-      const token = await firebaseUser.getIdToken()
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8081'}/api/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ displayName })
-      })
-      
-      if (!response.ok) {
-        throw new Error('Backend registration failed')
+      // Try to register with backend
+      try {
+        const token = await firebaseUser.getIdToken()
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8081'
+        
+        const response = await fetch(`${apiUrl}/api/auth/register`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ displayName })
+        })
+        
+        if (!response.ok) {
+          console.warn('Backend registration failed - continuing with frontend only')
+        }
+      } catch (backendError) {
+        console.warn('Backend not available - continuing with frontend only')
       }
       
       return firebaseUser
@@ -157,19 +171,25 @@ export const AuthProvider = ({ children }) => {
       // Update Firebase profile
       await updateUserProfile(user.uid, data)
       
-      // Update backend profile
-      const token = await getCurrentUserToken()
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8081'}/api/auth/profile`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(data)
-      })
-      
-      if (!response.ok) {
-        throw new Error('Failed to update profile')
+      // Try to update backend profile
+      try {
+        const token = await getCurrentUserToken()
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8081'
+        
+        const response = await fetch(`${apiUrl}/api/auth/profile`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(data)
+        })
+        
+        if (!response.ok) {
+          console.warn('Backend profile update failed')
+        }
+      } catch (backendError) {
+        console.warn('Backend not available for profile update')
       }
       
     } catch (error) {
@@ -178,22 +198,48 @@ export const AuthProvider = ({ children }) => {
     }
   }
 
+  const resendVerification = async () => {
+    try {
+      setError(null)
+      const sent = await resendVerificationEmail()
+      return sent
+    } catch (error) {
+      setError(error.message)
+      throw error
+    }
+  }
+
   const checkUsernameAvailability = async (username) => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8081'}/api/auth/check-username`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ username })
-      })
+      // First check Firebase
+      const firebaseAvailable = await import('@/lib/firebase').then(
+        module => module.checkUsernameAvailability(username)
+      )
       
-      if (!response.ok) {
-        throw new Error('Failed to check username')
+      if (!firebaseAvailable) {
+        return false
+      }
+
+      // Then check backend if available
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8081'
+        const response = await fetch(`${apiUrl}/api/auth/check-username`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ username })
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          return data.available
+        }
+      } catch (backendError) {
+        console.warn('Backend username check not available')
       }
       
-      const data = await response.json()
-      return data.available
+      return firebaseAvailable
     } catch (error) {
       throw error
     }
@@ -209,6 +255,16 @@ export const AuthProvider = ({ children }) => {
     return {}
   }
 
+  const trackAnalysis = async () => {
+    if (user?.uid) {
+      try {
+        await incrementAnalysisCount(user.uid)
+      } catch (error) {
+        console.error('Failed to track analysis:', error)
+      }
+    }
+  }
+
   const value = {
     user,
     userProfile,
@@ -220,12 +276,17 @@ export const AuthProvider = ({ children }) => {
     logout,
     forgotPassword,
     updateProfile,
+    resendVerification,
     checkUsernameAvailability,
     getAuthHeader,
+    trackAnalysis,
     isAuthenticated: !!user,
+    isEmailVerified: user?.emailVerified || false,
     isPro: userProfile?.subscription === 'pro' || userProfile?.subscription === 'enterprise',
     isAdmin: userProfile?.role === 'admin',
-    isModerator: userProfile?.role === 'moderator' || userProfile?.role === 'admin'
+    isModerator: userProfile?.role === 'moderator' || userProfile?.role === 'admin',
+    analysisCount: userProfile?.analysisCount || 0,
+    analysisLimit: userProfile?.subscription === 'free' ? 5 : Infinity
   }
 
   return (
@@ -234,4 +295,3 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   )
 }
-
