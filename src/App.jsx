@@ -77,19 +77,26 @@ function AppContent() {
     })
   }, [])
 
-  const handleUploadClick = useCallback((event) => {
-    event.preventDefault()
-    event.stopPropagation()
+  // FIXED: Simplified file upload click handler with debugging
+  const triggerFileUpload = useCallback(() => {
+    console.log('🔄 Upload clicked, checking limits...')
     
     // Check analysis limit for free users
     if (!isPro && analysisCount >= analysisLimit) {
+      console.log('❌ Analysis limit reached')
       alert('You have reached your analysis limit. Please upgrade to Pro for unlimited analyses.')
       setCurrentPage('pricing')
       return
     }
     
+    console.log('✅ Limits OK, triggering file input...')
+    console.log('📁 File input ref:', fileInputRef.current)
+    
     if (fileInputRef.current) {
       fileInputRef.current.click()
+      console.log('✅ File input clicked')
+    } else {
+      console.error('❌ File input ref is null!')
     }
   }, [isPro, analysisCount, analysisLimit])
 
@@ -109,11 +116,13 @@ function AppContent() {
   }
 
   const handleFileSelect = useCallback((event) => {
+    console.log('📁 File selected:', event.target.files)
     const file = event.target.files[0]
     if (file) {
       try {
         validateFile(file)
         setSelectedFile(file)
+        console.log('✅ File set:', file.name)
         if (currentPage !== 'upload') {
           setCurrentPage('upload')
         }
@@ -127,12 +136,14 @@ function AppContent() {
     event.preventDefault()
     event.stopPropagation()
     setDragOver(false)
+    console.log('📁 File dropped:', event.dataTransfer.files)
     
     const file = event.dataTransfer.files[0]
     if (file) {
       try {
         validateFile(file)
         setSelectedFile(file)
+        console.log('✅ Dropped file set:', file.name)
         if (currentPage !== 'upload') {
           setCurrentPage('upload')
         }
@@ -244,12 +255,8 @@ function AppContent() {
     }
   }, [selectedFile, additionalInfo, isAuthenticated, isPro, analysisCount, analysisLimit, trackAnalysis, backendStatus, convertToBase64])
 
-  const resetAnalysis = useCallback((event) => {
-    if (event) {
-      event.preventDefault()
-      event.stopPropagation()
-    }
-    
+  const resetAnalysis = useCallback(() => {
+    console.log('🔄 Resetting analysis...')
     setSelectedFile(null)
     setAdditionalInfo('')
     setAnalysisResult(null)
@@ -258,6 +265,15 @@ function AppContent() {
       fileInputRef.current.value = ''
     }
   }, [])
+
+  // FIXED: Memoized textarea change handler to prevent re-renders
+  const handleAdditionalInfoChange = useCallback((event) => {
+    console.log('📝 Textarea changed:', event.target.value)
+    setAdditionalInfo(event.target.value)
+  }, [])
+
+  // Add textarea ref to maintain focus
+  const textareaRef = useRef(null)
 
   // Navigation handlers
   const handleNavigation = useCallback((page, event) => {
@@ -661,7 +677,7 @@ function AppContent() {
     </div>
   )
 
-  // Enhanced Upload Page with backend status awareness
+  // COMPLETELY REWRITTEN Upload Page with proper event handling
   const UploadPage = () => (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
@@ -705,82 +721,136 @@ function AppContent() {
         <div className="bg-white rounded-lg shadow-lg p-8">
           {!analysisResult ? (
             <div className="space-y-6">
-              {/* File Upload Area */}
-              <div
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                className={`border-2 border-dashed rounded-lg p-12 text-center transition-all cursor-pointer ${
-                  dragOver 
-                    ? 'border-blue-400 bg-blue-50' 
-                    : selectedFile 
-                    ? 'border-green-400 bg-green-50'
-                    : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
-                }`}
-                onClick={handleUploadClick}
-              >
-                {selectedFile ? (
-                  <div className="space-y-4">
-                    <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
-                    <div>
-                      <p className="text-lg text-green-700 font-medium mb-2">
-                        File Selected: {selectedFile.name}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          resetAnalysis(e)
-                        }}
-                        className="mt-2 text-sm text-red-600 hover:text-red-800"
-                      >
-                        Remove file
-                      </button>
+              {/* COMPLETELY REWRITTEN File Upload Area with proper click handling */}
+              <div className="relative">
+                {/* Main Upload Area */}
+                <div
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  className={`
+                    border-2 border-dashed rounded-lg p-12 text-center transition-all cursor-pointer
+                    ${dragOver 
+                      ? 'border-blue-400 bg-blue-50' 
+                      : selectedFile 
+                      ? 'border-green-400 bg-green-50'
+                      : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
+                    }
+                  `}
+                  style={{ 
+                    minHeight: '200px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  {/* Hidden File Input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+                    onChange={handleFileSelect}
+                    style={{ display: 'none' }}
+                  />
+
+                  {selectedFile ? (
+                    <div className="space-y-4">
+                      <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
+                      <div>
+                        <p className="text-lg text-green-700 font-medium mb-2">
+                          File Selected: {selectedFile.name}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          Size: {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                        </p>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            resetAnalysis()
+                          }}
+                          className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+                        >
+                          Remove file
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <Upload className="h-12 w-12 text-gray-400 mx-auto" />
-                    <div>
-                      <p className="text-lg text-gray-600 mb-2">
-                        Drop your error screenshot here
-                      </p>
-                      <p className="text-sm text-gray-500">or click to browse files</p>
-                      <p className="text-xs text-gray-400 mt-2">
-                        Supports: JPG, PNG, GIF, WebP (max 10MB)
-                      </p>
+                  ) : (
+                    <div 
+                      className="space-y-4 w-full h-full flex flex-col items-center justify-center"
+                      onClick={triggerFileUpload}
+                    >
+                      <Upload className="h-12 w-12 text-gray-400 mx-auto" />
+                      <div>
+                        <p className="text-lg text-gray-600 mb-2">
+                          Drop your error screenshot here
+                        </p>
+                        <p className="text-sm text-gray-500">or click to browse files</p>
+                        <p className="text-xs text-gray-400 mt-2">
+                          Supports: JPG, PNG, GIF, WebP (max 10MB)
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                )}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
+                  )}
+                </div>
+
+                {/* Debug Button - Remove this after testing */}
+                <button
+                  onClick={() => {
+                    console.log('🐛 Debug click test')
+                    triggerFileUpload()
+                  }}
+                  className="mt-2 px-4 py-2 bg-red-500 text-white rounded text-sm"
+                >
+                  🐛 Debug: Test File Upload Click
+                </button>
               </div>
 
-              {/* Additional Information - FIXED */}
-              <div onClick={(e) => e.stopPropagation()}>
-                <label htmlFor="additional-info" className="block text-sm font-medium text-gray-700 mb-2">
+              {/* COMPLETELY REWRITTEN Additional Information Section */}
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <label 
+                  htmlFor="additional-info" 
+                  className="block text-sm font-medium text-gray-700 mb-3"
+                >
                   Additional Information (Optional)
                 </label>
                 <textarea
                   id="additional-info"
+                  name="additional-info"
                   value={additionalInfo}
-                  onChange={(e) => {
-                    e.stopPropagation()
-                    setAdditionalInfo(e.target.value)
+                  onChange={handleAdditionalInfoChange}
+                  onInput={handleAdditionalInfoChange}
+                  onKeyDown={(e) => {
+                    console.log('🔤 Key pressed:', e.key)
+                    // Don't prevent any default behavior
                   }}
-                  onClick={(e) => e.stopPropagation()}
-                  onFocus={(e) => e.stopPropagation()}
+                  onFocus={(e) => {
+                    console.log('🎯 Textarea focused')
+                    e.target.style.outline = '2px solid #3B82F6'
+                  }}
+                  onBlur={(e) => {
+                    console.log('👋 Textarea blurred')
+                    e.target.style.outline = 'none'
+                  }}
                   placeholder="Describe what you were doing when the error occurred, any error codes, or other relevant details..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                  className="
+                    w-full px-3 py-2 border border-gray-300 rounded-md 
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent 
+                    resize-none bg-white
+                  "
                   rows={4}
+                  style={{
+                    fontFamily: 'inherit',
+                    fontSize: '14px',
+                    lineHeight: '1.5'
+                  }}
                 />
+                
+                {/* Debug Info - Remove after testing */}
+                <div className="mt-2 text-xs text-gray-500 bg-yellow-50 p-2 rounded">
+                  🐛 Debug: Current value length: {additionalInfo.length}
+                  {additionalInfo && <div>Content: "{additionalInfo}"</div>}
+                </div>
               </div>
 
               {/* Upload Progress */}
@@ -872,7 +942,7 @@ function AppContent() {
   )
 
   // Keep all the other page components the same (AnalysisResults, SolutionCard, etc.)
-  // ... (rest of the components remain unchanged)
+  // ... (rest of the components remain unchanged for brevity)
 
   // Enhanced Analysis Results Component to match backend response format
   const AnalysisResults = () => (
@@ -1210,8 +1280,7 @@ function AppContent() {
     </div>
   )
 
-  // Keeping all other page components the same...
-  // Community Page placeholder (ready for integration)
+  // Keep the rest of the components the same (Community, Pricing, etc.)
   const CommunityPage = () => (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
@@ -1244,7 +1313,6 @@ function AppContent() {
     </div>
   )
 
-  // Keep existing HowItWorksPage, PricingPage, and HelpPage implementations...
   const HowItWorksPage = () => (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
@@ -1324,7 +1392,6 @@ function AppContent() {
     </div>
   )
 
-  // Enhanced Pricing Page
   const PricingPage = () => (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
@@ -1492,7 +1559,6 @@ function AppContent() {
     </div>
   )
 
-  // Enhanced Help Page
   const HelpPage = () => (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
@@ -1555,7 +1621,7 @@ function AppContent() {
     </div>
   )
 
-  // Export Modal
+  // Export Modal (unchanged)
   const ExportModal = () => (
     <AnimatePresence>
       {showExportModal && (
