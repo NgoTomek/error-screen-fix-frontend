@@ -37,27 +37,48 @@ import {
   deleteObject
 } from 'firebase/storage'
 
-// Firebase configuration - replace with your actual config
+// Firebase configuration - IMPORTANT: Replace with your actual Firebase config
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "demo-key",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "error-screen-fix.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "error-screen-fix",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "error-screen-fix.appspot.com",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "123456789",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:123456789:web:abcdef",
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-ABCDEF"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
+}
+
+// Check if required Firebase config is present
+const requiredFields = ['apiKey', 'authDomain', 'projectId']
+const missingFields = requiredFields.filter(field => !firebaseConfig[field])
+
+if (missingFields.length > 0) {
+  console.error('Missing Firebase configuration:', missingFields)
+  console.error('Please add these environment variables to your .env file:')
+  missingFields.forEach(field => {
+    console.error(`VITE_FIREBASE_${field.replace(/([A-Z])/g, '_$1').toUpperCase()}`)
+  })
 }
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig)
+let app, auth, db, storage
 
-// Initialize services
-export const auth = getAuth(app)
-export const db = getFirestore(app)
-export const storage = getStorage(app)
-
-// Configure auth settings
-auth.useDeviceLanguage()
+try {
+  app = initializeApp(firebaseConfig)
+  
+  // Initialize services
+  auth = getAuth(app)
+  db = getFirestore(app)
+  storage = getStorage(app)
+  
+  // Configure auth settings
+  auth.useDeviceLanguage()
+  
+  console.log('Firebase initialized successfully')
+} catch (error) {
+  console.error('Failed to initialize Firebase:', error)
+  throw new Error('Firebase initialization failed. Please check your configuration.')
+}
 
 // Auth providers
 export const googleProvider = new GoogleAuthProvider()
@@ -67,20 +88,29 @@ googleProvider.addScope('profile')
 // Auth functions
 export const createUser = async (email, password, displayName) => {
   try {
+    console.log('Creating user with email:', email)
     const userCredential = await createUserWithEmailAndPassword(auth, email, password)
     const user = userCredential.user
     
     // Update display name
-    await updateProfile(user, { displayName })
+    if (displayName) {
+      await updateProfile(user, { displayName })
+      console.log('Display name updated:', displayName)
+    }
     
     // Send verification email
-    await sendEmailVerification(user)
+    try {
+      await sendEmailVerification(user)
+      console.log('Verification email sent')
+    } catch (emailError) {
+      console.warn('Failed to send verification email:', emailError.message)
+    }
     
     // Create user profile in Firestore
     await setDoc(doc(db, 'users', user.uid), {
       uid: user.uid,
       email: user.email,
-      displayName,
+      displayName: displayName || '',
       emailVerified: false,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -105,6 +135,7 @@ export const createUser = async (email, password, displayName) => {
       }
     })
     
+    console.log('User profile created in Firestore')
     return user
   } catch (error) {
     console.error('Error creating user:', error)
@@ -114,7 +145,9 @@ export const createUser = async (email, password, displayName) => {
 
 export const signIn = async (email, password) => {
   try {
+    console.log('Signing in user:', email)
     const userCredential = await signInWithEmailAndPassword(auth, email, password)
+    console.log('Sign in successful')
     return userCredential.user
   } catch (error) {
     console.error('Error signing in:', error)
@@ -124,18 +157,21 @@ export const signIn = async (email, password) => {
 
 export const signInWithGoogle = async () => {
   try {
+    console.log('Starting Google sign in')
     const result = await signInWithPopup(auth, googleProvider)
     const user = result.user
+    console.log('Google sign in successful:', user.email)
     
     // Check if user profile exists
     const userDoc = await getDoc(doc(db, 'users', user.uid))
     
     if (!userDoc.exists()) {
+      console.log('Creating new user profile for Google user')
       // Create user profile for new Google users
       await setDoc(doc(db, 'users', user.uid), {
         uid: user.uid,
         email: user.email,
-        displayName: user.displayName,
+        displayName: user.displayName || '',
         emailVerified: user.emailVerified,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -159,7 +195,9 @@ export const signInWithGoogle = async () => {
           communityPoints: 0
         }
       })
+      console.log('New Google user profile created')
     } else {
+      console.log('Updating existing user login time')
       // Update last login for existing users
       await updateDoc(doc(db, 'users', user.uid), {
         lastLoginAt: serverTimestamp(),
@@ -176,7 +214,9 @@ export const signInWithGoogle = async () => {
 
 export const logOut = async () => {
   try {
+    console.log('Signing out user')
     await signOut(auth)
+    console.log('Sign out successful')
   } catch (error) {
     console.error('Error signing out:', error)
     throw error
@@ -185,10 +225,12 @@ export const logOut = async () => {
 
 export const resetPassword = async (email) => {
   try {
+    console.log('Sending password reset email to:', email)
     await sendPasswordResetEmail(auth, email, {
-      url: `${window.location.origin}/signin`,
+      url: `${window.location.origin}`,
       handleCodeInApp: false
     })
+    console.log('Password reset email sent')
   } catch (error) {
     console.error('Error sending password reset:', error)
     throw error
@@ -198,9 +240,12 @@ export const resetPassword = async (email) => {
 export const resendVerificationEmail = async () => {
   try {
     if (auth.currentUser && !auth.currentUser.emailVerified) {
+      console.log('Resending verification email')
       await sendEmailVerification(auth.currentUser)
+      console.log('Verification email sent')
       return true
     }
+    console.log('User already verified or not signed in')
     return false
   } catch (error) {
     console.error('Error resending verification email:', error)
@@ -211,10 +256,14 @@ export const resendVerificationEmail = async () => {
 // User profile functions
 export const getUserProfile = async (uid) => {
   try {
+    console.log('Getting user profile for:', uid)
     const userDoc = await getDoc(doc(db, 'users', uid))
     if (userDoc.exists()) {
-      return { id: userDoc.id, ...userDoc.data() }
+      const profile = { id: userDoc.id, ...userDoc.data() }
+      console.log('User profile retrieved')
+      return profile
     }
+    console.log('User profile not found')
     return null
   } catch (error) {
     console.error('Error getting user profile:', error)
@@ -224,10 +273,12 @@ export const getUserProfile = async (uid) => {
 
 export const updateUserProfile = async (uid, data) => {
   try {
+    console.log('Updating user profile:', uid, data)
     await updateDoc(doc(db, 'users', uid), {
       ...data,
       updatedAt: serverTimestamp()
     })
+    console.log('User profile updated successfully')
   } catch (error) {
     console.error('Error updating user profile:', error)
     throw error
@@ -236,13 +287,16 @@ export const updateUserProfile = async (uid, data) => {
 
 export const checkUsernameAvailability = async (username) => {
   try {
+    console.log('Checking username availability:', username)
     const q = query(
       collection(db, 'users'), 
       where('username', '==', username),
       limit(1)
     )
     const querySnapshot = await getDocs(q)
-    return querySnapshot.empty
+    const available = querySnapshot.empty
+    console.log('Username available:', available)
+    return available
   } catch (error) {
     console.error('Error checking username:', error)
     throw error
@@ -252,6 +306,7 @@ export const checkUsernameAvailability = async (username) => {
 // Storage functions
 export const uploadAvatar = async (uid, file) => {
   try {
+    console.log('Uploading avatar for user:', uid)
     const storageRef = ref(storage, `avatars/${uid}`)
     const snapshot = await uploadBytes(storageRef, file)
     const downloadURL = await getDownloadURL(snapshot.ref)
@@ -259,6 +314,7 @@ export const uploadAvatar = async (uid, file) => {
     // Update user profile with avatar URL
     await updateUserProfile(uid, { avatarUrl: downloadURL })
     
+    console.log('Avatar uploaded successfully')
     return downloadURL
   } catch (error) {
     console.error('Error uploading avatar:', error)
@@ -268,9 +324,11 @@ export const uploadAvatar = async (uid, file) => {
 
 export const uploadErrorScreenshot = async (file, analysisId) => {
   try {
+    console.log('Uploading error screenshot:', analysisId)
     const storageRef = ref(storage, `error-screenshots/${analysisId}`)
     const snapshot = await uploadBytes(storageRef, file)
     const downloadURL = await getDownloadURL(snapshot.ref)
+    console.log('Screenshot uploaded successfully')
     return downloadURL
   } catch (error) {
     console.error('Error uploading screenshot:', error)
@@ -280,23 +338,36 @@ export const uploadErrorScreenshot = async (file, analysisId) => {
 
 // Real-time listeners
 export const subscribeToUserProfile = (uid, callback) => {
+  console.log('Subscribing to user profile changes:', uid)
   return onSnapshot(doc(db, 'users', uid), (doc) => {
     if (doc.exists()) {
       callback({ id: doc.id, ...doc.data() })
     } else {
       callback(null)
     }
+  }, (error) => {
+    console.error('Error in user profile subscription:', error)
   })
 }
 
 export const subscribeToAuthState = (callback) => {
-  return onAuthStateChanged(auth, callback)
+  console.log('Subscribing to auth state changes')
+  return onAuthStateChanged(auth, callback, (error) => {
+    console.error('Error in auth state subscription:', error)
+  })
 }
 
 // Helper function to get current user token
 export const getCurrentUserToken = async () => {
   if (auth.currentUser) {
-    return await auth.currentUser.getIdToken()
+    try {
+      const token = await auth.currentUser.getIdToken()
+      console.log('Got current user token')
+      return token
+    } catch (error) {
+      console.error('Error getting current user token:', error)
+      throw error
+    }
   }
   return null
 }
@@ -304,6 +375,7 @@ export const getCurrentUserToken = async () => {
 // Analytics and user activity
 export const incrementAnalysisCount = async (uid) => {
   try {
+    console.log('Incrementing analysis count for user:', uid)
     const userRef = doc(db, 'users', uid)
     const userDoc = await getDoc(userRef)
     
@@ -313,6 +385,7 @@ export const incrementAnalysisCount = async (uid) => {
         analysisCount: currentCount + 1,
         updatedAt: serverTimestamp()
       })
+      console.log('Analysis count incremented to:', currentCount + 1)
     }
   } catch (error) {
     console.error('Error incrementing analysis count:', error)
@@ -321,12 +394,17 @@ export const incrementAnalysisCount = async (uid) => {
 
 export const updateUserActivity = async (uid, activity) => {
   try {
+    console.log('Logging user activity:', uid, activity)
     await addDoc(collection(db, 'user-activity'), {
       uid,
       activity,
       timestamp: serverTimestamp()
     })
+    console.log('User activity logged')
   } catch (error) {
     console.error('Error logging user activity:', error)
   }
 }
+
+// Export the initialized instances
+export { auth, db, storage }

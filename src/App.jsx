@@ -1,22 +1,20 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AuthProvider } from './contexts/AuthContext'
 import { SignInModal } from './components/auth/SignInModal'
 import { UserMenu } from './components/auth/UserMenu'
 import { useAuth } from './contexts/AuthContext'
+import { analysisAPI, testConnection, getErrorMessage } from './lib/api'
 import { 
   Upload, Zap, Shield, Users, CheckCircle, 
   BookOpen, User, LogOut, Download, 
   Share2, Bookmark, Copy, ThumbsUp, ThumbsDown, 
   ExternalLink, AlertTriangle, Menu, X, Home,
-  Crown, Sparkles, Clock, Star
+  Crown, Sparkles, Clock, Star, Wifi, WifiOff
 } from 'lucide-react'
 import { Button } from '@/components/ui/button.jsx'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import './App.css'
-
-// Updated API Base URL to match backend
-const API_BASE_URL = 'http://localhost:8082'
 
 function App() {
   return (
@@ -50,8 +48,24 @@ function AppContent() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [dragOver, setDragOver] = useState(false)
+  const [backendStatus, setBackendStatus] = useState(null) // 'online' | 'offline' | null
   
   const fileInputRef = useRef(null)
+
+  // Test backend connection on app load
+  useEffect(() => {
+    const checkBackend = async () => {
+      const result = await testConnection()
+      setBackendStatus(result.success ? 'online' : 'offline')
+      if (result.success) {
+        console.log('✅ Backend connected:', result.baseUrl)
+      } else {
+        console.warn('❌ Backend offline:', result.message)
+      }
+    }
+    
+    checkBackend()
+  }, [])
 
   // Utility functions
   const convertToBase64 = useCallback((file) => {
@@ -111,6 +125,7 @@ function AppContent() {
 
   const handleDrop = useCallback((event) => {
     event.preventDefault()
+    event.stopPropagation()
     setDragOver(false)
     
     const file = event.dataTransfer.files[0]
@@ -129,11 +144,13 @@ function AppContent() {
 
   const handleDragOver = useCallback((event) => {
     event.preventDefault()
+    event.stopPropagation()
     setDragOver(true)
   }, [])
 
   const handleDragLeave = useCallback((event) => {
     event.preventDefault()
+    event.stopPropagation()
     setDragOver(false)
   }, [])
 
@@ -143,7 +160,10 @@ function AppContent() {
       event.stopPropagation()
     }
     
-    if (!selectedFile) return
+    if (!selectedFile) {
+      alert('Please select a file first')
+      return
+    }
 
     // Check if user needs to sign in for authenticated features
     if (!isAuthenticated && analysisCount >= 5) {
@@ -173,33 +193,14 @@ function AppContent() {
         })
       }, 200)
 
+      // Convert file to base64
       const base64Image = await convertToBase64(selectedFile)
-      
       setUploadProgress(95)
-      
-      // Get auth headers if user is authenticated
-      const headers = {
-        'Content-Type': 'application/json',
-        ...(isAuthenticated ? await getAuthHeader() : {})
-      }
-      
-      const response = await fetch(`${API_BASE_URL}/api/analyze-error`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          image: base64Image,
-          context: additionalInfo || undefined
-        })
-      })
 
+      // Call backend API using the new API service
+      const result = await analysisAPI.analyzeError(base64Image, additionalInfo)
+      
       setUploadProgress(100)
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.message || 'Analysis failed')
-      }
-
-      const result = await response.json()
       setAnalysisResult(result)
       
       // Track the analysis if user is authenticated
@@ -207,23 +208,41 @@ function AppContent() {
         await trackAnalysis()
       }
       
+      console.log('✅ Analysis successful:', result.analysis_id)
+      
     } catch (error) {
-      console.error('Error analyzing image:', error)
+      console.error('❌ Analysis failed:', error)
+      
+      // Create a fallback error result with proper error handling
       setAnalysisResult({
-        error_detected: error.message || 'Failed to analyze the error. Please try again.',
+        error_detected: getErrorMessage(error),
         analysis_id: 'error_' + Date.now(),
         timestamp: new Date().toISOString(),
         category: 'Analysis Error',
         confidence: 0,
         severity: 'Medium',
         estimated_impact: 'Unable to process the image',
-        solutions: []
+        solutions: backendStatus === 'offline' ? [
+          {
+            title: "Backend Connection Issue",
+            description: "The analysis service is currently unavailable. This might be because the backend is not running or there's a network connectivity issue.",
+            steps: [
+              "Check if the backend service is running on the correct port",
+              "Verify your internet connection",
+              "Try refreshing the page and analyzing again",
+              "Contact support if the issue persists"
+            ],
+            difficulty: "Easy",
+            success_rate: "N/A",
+            estimated_time: "2-5 minutes"
+          }
+        ] : []
       })
     } finally {
       setIsAnalyzing(false)
       setUploadProgress(0)
     }
-  }, [selectedFile, additionalInfo, isAuthenticated, isPro, analysisCount, analysisLimit, trackAnalysis, getAuthHeader, convertToBase64])
+  }, [selectedFile, additionalInfo, isAuthenticated, isPro, analysisCount, analysisLimit, trackAnalysis, backendStatus, convertToBase64])
 
   const resetAnalysis = useCallback((event) => {
     if (event) {
@@ -250,12 +269,12 @@ function AppContent() {
     setMobileMenuOpen(false)
   }, [])
 
-  // Header Component with enhanced styling
+  // Header Component with backend status indicator
   const Header = () => (
     <header className="bg-white shadow-sm border-b sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          <div className="flex items-center">
+          <div className="flex items-center space-x-3">
             <button
               onClick={(e) => handleNavigation('home', e)}
               className="flex items-center space-x-2 text-xl font-bold text-blue-600 hover:text-blue-700 transition-colors"
@@ -263,6 +282,22 @@ function AppContent() {
               <Zap className="h-6 w-6" />
               <span>Error Screen Fix</span>
             </button>
+            
+            {/* Backend Status Indicator */}
+            {backendStatus && (
+              <div className={`flex items-center space-x-1 px-2 py-1 rounded-full text-xs ${
+                backendStatus === 'online' 
+                  ? 'bg-green-100 text-green-800' 
+                  : 'bg-red-100 text-red-800'
+              }`}>
+                {backendStatus === 'online' ? (
+                  <Wifi className="h-3 w-3" />
+                ) : (
+                  <WifiOff className="h-3 w-3" />
+                )}
+                <span>{backendStatus === 'online' ? 'Online' : 'Offline'}</span>
+              </div>
+            )}
           </div>
 
           {/* Desktop Navigation */}
@@ -426,9 +461,21 @@ function AppContent() {
     </header>
   )
 
-  // Enhanced Home Page (keeping existing implementation)
+  // Enhanced Home Page with backend status
   const HomePage = () => (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      {/* Backend Status Alert */}
+      {backendStatus === 'offline' && (
+        <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-3">
+          <div className="max-w-7xl mx-auto flex items-center justify-center">
+            <AlertTriangle className="h-5 w-5 text-yellow-600 mr-2" />
+            <span className="text-yellow-800 text-sm">
+              Backend service is currently offline. Some features may not work properly.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Hero Section */}
       <section className="pt-20 pb-16 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto text-center">
@@ -479,6 +526,7 @@ function AppContent() {
         </div>
       </section>
 
+      {/* Rest of HomePage content stays the same... */}
       {/* Stats Section */}
       <section className="py-16 px-4 sm:px-6 lg:px-8 bg-white border-y">
         <div className="max-w-7xl mx-auto">
@@ -613,13 +661,23 @@ function AppContent() {
     </div>
   )
 
-  // Enhanced Upload Page (keeping existing implementation but with better backend integration)
+  // Enhanced Upload Page with backend status awareness
   const UploadPage = () => (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-4">Upload Your Error Screenshot</h1>
           <p className="text-gray-600">Get instant AI-powered solutions for any technical error</p>
+          
+          {/* Backend Status Warning */}
+          {backendStatus === 'offline' && (
+            <Alert className="mt-4 border-yellow-200 bg-yellow-50">
+              <AlertTriangle className="h-4 w-4 text-yellow-600" />
+              <AlertDescription className="text-yellow-800">
+                The analysis service is currently offline. You can still upload files, but analysis may not work until the service is restored.
+              </AlertDescription>
+            </Alert>
+          )}
           
           {/* Usage indicator */}
           {isAuthenticated && (
@@ -674,7 +732,7 @@ function AppContent() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
-                          resetAnalysis()
+                          resetAnalysis(e)
                         }}
                         className="mt-2 text-sm text-red-600 hover:text-red-800"
                       >
@@ -705,15 +763,20 @@ function AppContent() {
                 />
               </div>
 
-              {/* Additional Information */}
-              <div>
+              {/* Additional Information - FIXED */}
+              <div onClick={(e) => e.stopPropagation()}>
                 <label htmlFor="additional-info" className="block text-sm font-medium text-gray-700 mb-2">
                   Additional Information (Optional)
                 </label>
                 <textarea
                   id="additional-info"
                   value={additionalInfo}
-                  onChange={(e) => setAdditionalInfo(e.target.value)}
+                  onChange={(e) => {
+                    e.stopPropagation()
+                    setAdditionalInfo(e.target.value)
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  onFocus={(e) => e.stopPropagation()}
                   placeholder="Describe what you were doing when the error occurred, any error codes, or other relevant details..."
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                   rows={4}
@@ -807,6 +870,9 @@ function AppContent() {
       </div>
     </div>
   )
+
+  // Keep all the other page components the same (AnalysisResults, SolutionCard, etc.)
+  // ... (rest of the components remain unchanged)
 
   // Enhanced Analysis Results Component to match backend response format
   const AnalysisResults = () => (
@@ -902,19 +968,6 @@ function AppContent() {
                   </div>
                 )}
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Error Display for failed analyses */}
-      {analysisResult.error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <div className="flex items-start space-x-3">
-            <AlertTriangle className="h-6 w-6 text-red-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <h3 className="text-lg font-semibold text-red-900 mb-2">Analysis Error</h3>
-              <p className="text-red-800">{analysisResult.error}</p>
             </div>
           </div>
         </div>
@@ -1061,7 +1114,7 @@ function AppContent() {
               <h6 className="text-sm font-medium text-gray-900 mb-2">Sources:</h6>
               <div className="space-y-1">
                 {solution.sources.map((source, sIndex) => (
-                  
+                  <a
                     key={sIndex}
                     href={source.url}
                     target="_blank"
@@ -1157,6 +1210,7 @@ function AppContent() {
     </div>
   )
 
+  // Keeping all other page components the same...
   // Community Page placeholder (ready for integration)
   const CommunityPage = () => (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
