@@ -1,18 +1,23 @@
+// src/App.jsx - Updated with enhanced authentication system
+
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AuthProvider } from './contexts/AuthContext'
 import { SignInModal } from './components/auth/SignInModal'
 import { UserMenu } from './components/auth/UserMenu'
+import { AuthTest } from './components/AuthTest'
 import { useAuth } from './contexts/AuthContext'
 import { testConnection } from './lib/api'
 import UploadPage from './components/UploadPage'
 import { 
   Zap, Shield, Users, BookOpen, User, CheckCircle,
   Menu, X, Home, Upload, Crown, Wifi, WifiOff,
-  AlertTriangle, Clock, TrendingUp, Star, Sparkles
+  AlertTriangle, Clock, TrendingUp, Star, Sparkles,
+  Loader2, Mail
 } from 'lucide-react'
 import { Button } from '@/components/ui/button.jsx'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Card, CardContent } from '@/components/ui/card'
 import './App.css'
 
 function App() {
@@ -26,16 +31,25 @@ function App() {
 function AppContent() {
   const { 
     user, 
+    userProfile,
     isAuthenticated, 
     analysisCount, 
     analysisLimit, 
-    isPro
+    isPro,
+    loading: authLoading,
+    authReady,
+    needsEmailVerification,
+    shouldUpgrade,
+    canAnalyze,
+    error: authError,
+    clearError
   } = useAuth()
   
   const [currentPage, setCurrentPage] = useState('home')
   const [showSignInModal, setShowSignInModal] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [backendStatus, setBackendStatus] = useState(null)
+  const [showAuthTest, setShowAuthTest] = useState(false)
 
   // Test backend connection on load
   useEffect(() => {
@@ -46,16 +60,61 @@ function AppContent() {
     checkBackend()
   }, [])
 
+  // Handle navigation
   const handleNavigation = useCallback((page) => {
     setCurrentPage(page)
     setMobileMenuOpen(false)
+    
+    // Clear any auth errors when navigating
+    if (authError) {
+      clearError()
+    }
+  }, [authError, clearError])
+
+  // Handle sign in modal
+  const handleSignInClick = useCallback(() => {
+    setShowSignInModal(true)
   }, [])
 
-  // Memoized header
+  const handleSignInModalClose = useCallback(() => {
+    setShowSignInModal(false)
+  }, [])
+
+  // Email verification banner
+  const EmailVerificationBanner = useMemo(() => {
+    if (!needsEmailVerification) return null
+
+    return (
+      <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-3">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center">
+            <Mail className="h-5 w-5 text-yellow-600 mr-2" />
+            <span className="text-yellow-800 text-sm">
+              Please verify your email address to access all features.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-yellow-300 text-yellow-700 hover:bg-yellow-100"
+            onClick={() => {
+              // This would trigger resend verification
+              console.log('Resend verification')
+            }}
+          >
+            Resend Email
+          </Button>
+        </div>
+      </div>
+    )
+  }, [needsEmailVerification])
+
+  // Header component
   const Header = useMemo(() => (
     <header className="bg-white shadow-sm border-b sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
+          {/* Logo and Status */}
           <div className="flex items-center space-x-3">
             <button
               onClick={() => handleNavigation('home')}
@@ -65,20 +124,44 @@ function AppContent() {
               <span>Error Screen Fix</span>
             </button>
             
-            {backendStatus && (
+            {/* System Status Indicators */}
+            <div className="flex items-center space-x-2">
+              {/* Backend Status */}
+              {backendStatus && (
+                <div className={`flex items-center space-x-1 px-2 py-1 rounded-full text-xs ${
+                  backendStatus === 'online' 
+                    ? 'bg-green-100 text-green-800' 
+                    : 'bg-red-100 text-red-800'
+                }`}>
+                  {backendStatus === 'online' ? (
+                    <Wifi className="h-3 w-3" />
+                  ) : (
+                    <WifiOff className="h-3 w-3" />
+                  )}
+                  <span>{backendStatus === 'online' ? 'API Online' : 'API Offline'}</span>
+                </div>
+              )}
+              
+              {/* Auth Status */}
               <div className={`flex items-center space-x-1 px-2 py-1 rounded-full text-xs ${
-                backendStatus === 'online' 
+                authReady 
                   ? 'bg-green-100 text-green-800' 
-                  : 'bg-red-100 text-red-800'
+                  : 'bg-yellow-100 text-yellow-800'
               }`}>
-                {backendStatus === 'online' ? (
-                  <Wifi className="h-3 w-3" />
-                ) : (
-                  <WifiOff className="h-3 w-3" />
-                )}
-                <span>{backendStatus === 'online' ? 'Online' : 'Offline'}</span>
+                <CheckCircle className="h-3 w-3" />
+                <span>{authReady ? 'Auth Ready' : 'Loading'}</span>
               </div>
-            )}
+              
+              {/* Debug Toggle - Dev Only */}
+              {import.meta.env.DEV && (
+                <button
+                  onClick={() => setShowAuthTest(!showAuthTest)}
+                  className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded"
+                >
+                  Debug
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Desktop Navigation */}
@@ -109,7 +192,8 @@ function AppContent() {
           <div className="flex items-center space-x-4">
             {isAuthenticated ? (
               <div className="flex items-center space-x-3">
-                {!isPro && (
+                {/* Upgrade Button for Free Users */}
+                {shouldUpgrade && (
                   <Button
                     size="sm"
                     onClick={() => handleNavigation('pricing')}
@@ -119,18 +203,32 @@ function AppContent() {
                     Upgrade
                   </Button>
                 )}
+                
+                {/* Usage Indicator */}
+                {!isPro && (
+                  <div className="hidden sm:flex items-center space-x-1 text-xs text-gray-600">
+                    <span>{analysisCount}/{analysisLimit}</span>
+                  </div>
+                )}
+                
                 <UserMenu />
               </div>
             ) : (
               <Button
-                onClick={() => setShowSignInModal(true)}
+                onClick={handleSignInClick}
                 className="flex items-center space-x-1"
+                disabled={authLoading}
               >
-                <User className="h-4 w-4" />
+                {authLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <User className="h-4 w-4" />
+                )}
                 <span>Sign In</span>
               </Button>
             )}
 
+            {/* Mobile Menu Button */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="md:hidden p-2 rounded-md text-gray-700 hover:text-blue-600 transition-colors"
@@ -169,15 +267,48 @@ function AppContent() {
                     {item.label}
                   </button>
                 ))}
+                
+                {/* Mobile User Info */}
+                {isAuthenticated && (
+                  <div className="pt-4 border-t mt-4">
+                    <div className="px-3 py-2">
+                      <div className="text-sm text-gray-600">
+                        Signed in as {userProfile?.displayName || user?.email}
+                      </div>
+                      {!isPro && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          {analysisCount}/{analysisLimit} analyses used
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
     </header>
-  ), [backendStatus, currentPage, mobileMenuOpen, isAuthenticated, isPro, handleNavigation])
+  ), [currentPage, mobileMenuOpen, isAuthenticated, isPro, analysisCount, analysisLimit, shouldUpgrade, backendStatus, authReady, authLoading, userProfile, user, handleNavigation, handleSignInClick])
 
-  // COMPLETE HomePage with all original content
+  // Loading state check - after all hooks are defined
+  if (!authReady && authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            Loading Error Screen Fix
+          </h2>
+          <p className="text-gray-600">
+            Initializing authentication system...
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  // HomePage Component
   const HomePage = () => (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Backend Status Alert */}
@@ -188,6 +319,21 @@ function AppContent() {
             <span className="text-yellow-800 text-sm">
               Backend service is currently offline. Some features may not work properly.
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Auth Error Alert */}
+      {authError && (
+        <div className="bg-red-50 border-b border-red-200 px-4 py-3">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div className="flex items-center">
+              <AlertTriangle className="h-5 w-5 text-red-600 mr-2" />
+              <span className="text-red-800 text-sm">{authError}</span>
+            </div>
+            <Button size="sm" variant="outline" onClick={clearError}>
+              Dismiss
+            </Button>
           </div>
         </div>
       )}
@@ -208,16 +354,39 @@ function AppContent() {
               powered by advanced AI. From blue screens to app crashes, we've got you covered.
             </p>
             
+            {/* Usage Indicator for Authenticated Users */}
             {isAuthenticated && (
               <div className="mb-6">
-                <Alert className="max-w-md mx-auto">
-                  <AlertDescription>
-                    You have used {analysisCount} of {isPro ? '∞' : analysisLimit} analyses this month
-                    {!isPro && analysisCount >= analysisLimit && (
-                      <span className="text-red-600 font-medium"> - Upgrade for unlimited access!</span>
+                <Card className="max-w-md mx-auto">
+                  <CardContent className="p-4">
+                    <div className="flex justify-between items-center text-sm">
+                      <span>Analyses used this month:</span>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-medium">{analysisCount}/{isPro ? '∞' : analysisLimit}</span>
+                        {isPro && <Crown className="h-4 w-4 text-blue-600" />}
+                      </div>
+                    </div>
+                    {!isPro && (
+                      <div className="w-full bg-gray-200 rounded-full h-2 mt-3">
+                        <div 
+                          className={`h-2 rounded-full transition-all duration-300 ${
+                            analysisCount >= analysisLimit ? 'bg-red-500' : 
+                            analysisCount >= analysisLimit * 0.8 ? 'bg-yellow-500' : 
+                            'bg-blue-600'
+                          }`}
+                          style={{ 
+                            width: `${Math.min((analysisCount / analysisLimit) * 100, 100)}%` 
+                          }}
+                        />
+                      </div>
                     )}
-                  </AlertDescription>
-                </Alert>
+                    {!canAnalyze && (
+                      <p className="text-red-600 font-medium text-sm mt-2">
+                        Analysis limit reached! Upgrade for unlimited access.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
             )}
 
@@ -226,9 +395,10 @@ function AppContent() {
                 size="lg"
                 onClick={() => handleNavigation('upload')}
                 className="bg-blue-600 hover:bg-blue-700"
+                disabled={!canAnalyze}
               >
                 <Zap className="h-5 w-5 mr-2" />
-                Start Fixing Errors
+                {canAnalyze ? 'Start Fixing Errors' : 'Upgrade to Continue'}
               </Button>
               <Button
                 size="lg"
@@ -331,13 +501,24 @@ function AppContent() {
             Join thousands of users who trust our AI to solve their technical problems
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button
-              size="lg"
-              onClick={() => handleNavigation('upload')}
-              className="bg-white text-blue-600 hover:bg-gray-100"
-            >
-              Start Free Analysis
-            </Button>
+            {isAuthenticated ? (
+              <Button
+                size="lg"
+                onClick={() => handleNavigation('upload')}
+                className="bg-white text-blue-600 hover:bg-gray-100"
+                disabled={!canAnalyze}
+              >
+                {canAnalyze ? 'Start Free Analysis' : 'Upgrade to Continue'}
+              </Button>
+            ) : (
+              <Button
+                size="lg"
+                onClick={handleSignInClick}
+                className="bg-white text-blue-600 hover:bg-gray-100"
+              >
+                Get Started Free
+              </Button>
+            )}
             {!isPro && (
               <Button
                 size="lg"
@@ -355,7 +536,7 @@ function AppContent() {
     </div>
   )
 
-  // COMPLETE Community Page
+  // Community Page Placeholder
   const CommunityPage = () => (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
@@ -377,7 +558,7 @@ function AppContent() {
             </p>
           ) : (
             <Button
-              onClick={() => setShowSignInModal(true)}
+              onClick={handleSignInClick}
               className="bg-blue-600 hover:bg-blue-700"
             >
               Sign in to be notified
@@ -388,7 +569,7 @@ function AppContent() {
     </div>
   )
 
-  // COMPLETE How It Works Page
+  // How It Works Page (keeping the original implementation)
   const HowItWorksPage = () => (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
@@ -461,15 +642,16 @@ function AppContent() {
             size="lg"
             onClick={() => handleNavigation('upload')}
             className="bg-blue-600 hover:bg-blue-700"
+            disabled={!canAnalyze}
           >
-            Try It Now
+            {canAnalyze ? 'Try It Now' : 'Sign Up to Try'}
           </Button>
         </div>
       </div>
     </div>
   )
 
-  // COMPLETE Pricing Page
+  // Pricing Page (keeping the original implementation with auth enhancements)
   const PricingPage = () => (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
@@ -484,8 +666,18 @@ function AppContent() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="bg-white rounded-lg shadow-lg p-8 border-2 border-gray-200 relative"
+            className={`bg-white rounded-lg shadow-lg p-8 border-2 relative ${
+              !isAuthenticated || !isPro ? 'border-blue-200' : 'border-gray-200'
+            }`}
           >
+            {!isPro && isAuthenticated && (
+              <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                <span className="bg-blue-500 text-white px-4 py-1 rounded-full text-sm font-medium">
+                  Current Plan
+                </span>
+              </div>
+            )}
+            
             <div className="text-center">
               <h3 className="text-2xl font-bold text-gray-900 mb-4">Free</h3>
               <div className="text-4xl font-bold text-gray-900 mb-2">$0</div>
@@ -514,15 +706,15 @@ function AppContent() {
             <Button
               onClick={() => {
                 if (!isAuthenticated) {
-                  setShowSignInModal(true)
+                  handleSignInClick()
                 } else {
                   handleNavigation('upload')
                 }
               }}
               variant="outline"
-              className="w-full border-purple-600 text-purple-600 hover:bg-purple-50"
+              className="w-full border-blue-600 text-blue-600 hover:bg-blue-50"
             >
-              Get Started
+              {isAuthenticated ? 'Current Plan' : 'Get Started'}
             </Button>
           </motion.div>
 
@@ -531,11 +723,13 @@ function AppContent() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="bg-white rounded-lg shadow-lg p-8 border-2 border-blue-500 relative transform scale-105"
+            className={`bg-white rounded-lg shadow-lg p-8 border-2 relative transform scale-105 ${
+              isPro ? 'border-blue-500' : 'border-blue-500'
+            }`}
           >
             <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
               <span className="bg-blue-500 text-white px-4 py-1 rounded-full text-sm font-medium">
-                Most Popular
+                {isPro ? 'Current Plan' : 'Most Popular'}
               </span>
             </div>
             
@@ -574,12 +768,16 @@ function AppContent() {
             
             <Button
               onClick={() => {
-                alert('Pro upgrade coming soon! Contact support for early access.')
+                if (!isAuthenticated) {
+                  handleSignInClick()
+                } else {
+                  alert('Pro upgrade coming soon! Contact support for early access.')
+                }
               }}
               className="w-full bg-blue-600 hover:bg-blue-700"
             >
               <Crown className="h-5 w-5 mr-2" />
-              Upgrade to Pro
+              {isPro ? 'Current Plan' : 'Upgrade to Pro'}
             </Button>
           </motion.div>
 
@@ -641,8 +839,20 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Email Verification Banner */}
+      {EmailVerificationBanner}
+      
+      {/* Header */}
       {Header}
       
+      {/* Auth Test Component - Dev Only */}
+      {import.meta.env.DEV && showAuthTest && (
+        <div className="border-b bg-gray-100">
+          <AuthTest />
+        </div>
+      )}
+      
+      {/* Main Content */}
       <main>
         {currentPage === 'home' && <HomePage />}
         {currentPage === 'upload' && <UploadPage />}
@@ -651,9 +861,10 @@ function AppContent() {
         {currentPage === 'pricing' && <PricingPage />}
       </main>
 
+      {/* Sign In Modal */}
       <SignInModal 
         isOpen={showSignInModal} 
-        onClose={() => setShowSignInModal(false)} 
+        onClose={handleSignInModalClose} 
       />
     </div>
   )
