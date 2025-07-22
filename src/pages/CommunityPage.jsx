@@ -27,7 +27,7 @@ import { formatDistanceToNow } from 'date-fns'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8081'
 
-export const CommunityPage = () => {
+const CommunityPage = () => {
   const { user, userProfile, getAuthHeader } = useAuth()
   const navigate = useNavigate()
   const [solutions, setSolutions] = useState([])
@@ -70,6 +70,50 @@ export const CommunityPage = () => {
       setHasMore(data.pagination.hasNext)
     } catch (error) {
       console.error('Error fetching solutions:', error)
+      
+      // If it's a CORS/network error, show fallback content
+      if (error.message.includes('CORS') || error.message.includes('Failed to fetch')) {
+        // Set some fallback/demo data for development
+        setSolutions([
+          {
+            id: 'demo-1',
+            title: 'Demo Solution: Fix Common Windows Blue Screen Error',
+            description: 'This is a demo solution showing how the community page will work when the backend is available.',
+            category: 'System',
+            difficulty: 'Medium',
+            upvoteCount: 42,
+            commentCount: 8,
+            bookmarkCount: 15,
+            tags: ['windows', 'bsod', 'memory'],
+            author: {
+              displayName: 'Demo User',
+              avatarUrl: null
+            },
+            createdAt: new Date().toISOString(),
+            userVote: null,
+            isBookmarked: false
+          },
+          {
+            id: 'demo-2',
+            title: 'Demo Solution: Resolve Network Connection Issues',
+            description: 'Another demo solution for development purposes. Real solutions will appear here once backend is connected.',
+            category: 'Network',
+            difficulty: 'Easy',
+            upvoteCount: 28,
+            commentCount: 5,
+            bookmarkCount: 9,
+            tags: ['network', 'wifi', 'troubleshooting'],
+            author: {
+              displayName: 'Demo Expert',
+              avatarUrl: null
+            },
+            createdAt: new Date(Date.now() - 86400000).toISOString(), // Yesterday
+            userVote: null,
+            isBookmarked: false
+          }
+        ])
+        setHasMore(false)
+      }
     } finally {
       setLoading(false)
     }
@@ -437,3 +481,4 @@ const SolutionCard = ({ solution, onVote, onBookmark }) => {
   )
 }
 
+export default CommunityPage

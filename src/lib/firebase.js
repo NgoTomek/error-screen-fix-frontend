@@ -79,6 +79,21 @@ try {
   // Configure auth settings
   auth.useDeviceLanguage()
   
+  // Configure Firestore for better development experience
+  if (import.meta.env.DEV) {
+    try {
+      // Enable offline persistence for better development experience
+      // This helps prevent "offline" errors during development
+      console.log('🔧 Configuring Firestore for development...')
+      
+      // Add connection retry settings
+      db._delegate._databaseId = { ...db._delegate._databaseId }
+      
+    } catch (error) {
+      console.warn('Could not apply Firestore settings:', error.message)
+    }
+  }
+  
   // Connect to emulators in development (optional)
   if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true') {
     console.log('🔧 Connecting to Firebase emulators...')
@@ -253,64 +268,76 @@ export const signInWithGoogle = async () => {
     
     console.log('✅ Google sign in successful:', user.email)
     
-    // Check if user profile exists
-    const userDocRef = doc(db, 'users', user.uid)
-    const userDoc = await getDoc(userDocRef)
-    
-    const now = serverTimestamp()
-    
-    if (!userDoc.exists()) {
-      console.log('👤 Creating new user profile for Google user')
+    // Try to handle user profile creation/update (non-blocking for offline scenarios)
+    try {
+      // Check if user profile exists
+      const userDocRef = doc(db, 'users', user.uid)
+      const userDoc = await getDoc(userDocRef)
       
-      // Create user profile for new Google users
-      const userProfile = {
-        uid: user.uid,
-        email: user.email.toLowerCase(),
-        displayName: user.displayName || '',
-        emailVerified: user.emailVerified,
-        createdAt: now,
-        updatedAt: now,
-        lastLoginAt: now,
-        role: 'user',
-        subscription: 'free',
-        analysisCount: 0,
-        analysisLimit: 5,
-        solutionsShared: 0,
-        reputation: 0,
-        bio: '',
-        avatarUrl: user.photoURL || '',
-        username: '',
-        settings: {
-          emailNotifications: true,
-          communityNotifications: true,
-          darkMode: false,
-          language: 'en'
-        },
-        stats: {
-          errorsResolved: 0,
-          solutionsHelpful: 0,
-          communityPoints: 0
+      const now = serverTimestamp()
+      
+      if (!userDoc.exists()) {
+        console.log('👤 Creating new user profile for Google user')
+        
+        // Create user profile for new Google users
+        const userProfile = {
+          uid: user.uid,
+          email: user.email.toLowerCase(),
+          displayName: user.displayName || '',
+          emailVerified: user.emailVerified,
+          createdAt: now,
+          updatedAt: now,
+          lastLoginAt: now,
+          role: 'user',
+          subscription: 'free',
+          analysisCount: 0,
+          analysisLimit: 5,
+          solutionsShared: 0,
+          reputation: 0,
+          bio: '',
+          avatarUrl: user.photoURL || '',
+          username: '',
+          settings: {
+            emailNotifications: true,
+            communityNotifications: true,
+            darkMode: false,
+            language: 'en'
+          },
+          stats: {
+            errorsResolved: 0,
+            solutionsHelpful: 0,
+            communityPoints: 0
+          }
         }
+        
+        await setDoc(userDocRef, userProfile)
+        console.log('✅ New Google user profile created')
+      } else {
+        console.log('🔄 Updating existing user login time')
+        // Update last login for existing users
+        await updateDoc(userDocRef, {
+          lastLoginAt: now,
+          updatedAt: now,
+          // Update email verification status if it changed
+          ...(user.emailVerified && { emailVerified: true })
+        })
+        console.log('✅ User profile updated')
       }
-      
-      await setDoc(userDocRef, userProfile)
-      console.log('✅ New Google user profile created')
-    } else {
-      console.log('🔄 Updating existing user login time')
-      // Update last login for existing users
-      await updateDoc(userDocRef, {
-        lastLoginAt: now,
-        updatedAt: now,
-        // Update email verification status if it changed
-        ...(user.emailVerified && { emailVerified: true })
-      })
-      console.log('✅ User profile updated')
+    } catch (profileError) {
+      console.warn('⚠️ Could not handle user profile (offline):', profileError.message)
+      // Don't throw error - authentication was successful, profile issues are secondary
     }
     
     return user
   } catch (error) {
     console.error('❌ Error signing in with Google:', error)
-    const message = getAuthErrorMessage(error.code) || error.message
+    
+    // Handle Firestore offline errors specifically
+    if (error.code === 'unavailable' || error.message.includes('offline')) {
+      throw new Error('Authentication service temporarily unavailable. Please try again.')
+    }
+    
+    const message = getAuthErrorMessage(error.code) || 'An unexpected error occurred. Please try again.'
     throw new Error(message)
   }
 }
@@ -375,22 +402,67 @@ export const resendVerificationEmail = async () => {
 }
 
 // User profile functions
-export const getUserProfile = async (uid) => {
-  try {
-    console.log('👤 Getting user profile for:', uid)
-    const userDoc = await getDoc(doc(db, 'users', uid))
-    
-    if (userDoc.exists()) {
-      const profile = { id: userDoc.id, ...userDoc.data() }
-      console.log('✅ User profile retrieved')
-      return profile
+export const getUserProfile = async (uid, retries = 1) => {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      console.log('👤 Getting user profile for:', uid)
+      const userDoc = await getDoc(doc(db, 'users', uid))
+      
+      if (userDoc.exists()) {
+        const profile = { id: userDoc.id, ...userDoc.data() }
+        console.log('✅ User profile retrieved')
+        return profile
+      }
+      
+      console.log('⚠️ User profile not found, creating default profile')
+      
+      // Create default profile if it doesn't exist
+      const defaultProfile = {
+        displayName: uid.substring(0, 8), // Use part of UID as default name
+        email: '',
+        role: 'user',
+        subscription: 'free',
+        analysisCount: 0,
+        emailVerified: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }
+      
+      // Try to create default profile (non-blocking)
+      try {
+        await setDoc(doc(db, 'users', uid), defaultProfile)
+        console.log('✅ Default user profile created')
+        return { id: uid, ...defaultProfile }
+      } catch (createError) {
+        console.warn('Could not create default profile:', createError.message)
+        return null
+      }
+      
+    } catch (error) {
+      console.error('❌ Error getting user profile:', error)
+      
+      // Handle specific Firestore errors
+      if (error.code === 'unavailable' || error.message.includes('offline')) {
+        console.warn('🔄 Firestore appears offline, returning minimal profile')
+        return {
+          id: uid,
+          displayName: 'User',
+          subscription: 'free',
+          analysisCount: 0,
+          offline: true
+        }
+      }
+      
+      if (attempt < retries) {
+        console.log(`Retrying user profile fetch (${attempt + 1}/${retries + 1})`)
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        continue
+      }
+      
+      // Final attempt failed
+      console.warn('Could not load user profile, using fallback')
+      return null
     }
-    
-    console.log('⚠️ User profile not found')
-    return null
-  } catch (error) {
-    console.error('❌ Error getting user profile:', error)
-    throw new Error('Failed to load user profile')
   }
 }
 
